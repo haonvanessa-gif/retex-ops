@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Retex Ops – Démonstrateur IHM Central Opérations</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<style>
+:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{background:#0a1017;color:#d6e0ea;font-family:"IBM Plex Sans",system-ui,"Segoe UI",Arial,sans-serif;font-variant-numeric:tabular-nums}
+button{cursor:pointer}button:disabled{cursor:not-allowed;opacity:.45}
+:focus-visible{outline:2px solid #fff;outline-offset:2px}
+.pn{background:#111a24;border:1px solid #223140}
+.bt{background:#1a2735;border:1px solid #2e4155;padding:.35rem .7rem;font-size:.8rem}
+.bt:hover:not(:disabled){background:#243649}
+.on{background:#2b4a68;border-color:#4aa3ff}
+.scr{overflow:auto;scrollbar-color:#2e4155 #111a24}
+@keyframes pu{50%{opacity:.35}}.pu{animation:pu 1s steps(2) infinite}
+@media (prefers-reduced-motion:reduce){.pu{animation:none}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect,useRef}=React;const h=React.createElement;
+const C={friend:"#4aa3ff",hostile:"#ff4d4d",unknown:"#ffd23f",neutral:"#5fd0a0",conflict:"#d98cff"};
+const L={friend:"Ami",hostile:"Hostile",unknown:"Douteux",neutral:"Neutre",conflict:"Conflit"};
+const SN={radar:"Radar de veille",esm:"ESM (émissions)",iff:"IFF Mode 5",ais:"AIS",eo:"Optronique"};
+const F=12; // facteur d’accélération du temps de démonstration
+const T0=[
+{id:"H-401",k:"Surface",x:14,y:9,hd:240,sp:22,s:{radar:["hostile",.7,3],esm:["hostile",.85,5]}},
+{id:"C-212",k:"Surface",x:-12,y:7,hd:120,sp:16,s:{iff:["friend",.9,4],esm:["hostile",.8,6],radar:["unknown",.5,2]}},
+{id:"F-110",k:"Surface",x:-6,y:-10,hd:90,sp:18,s:{iff:["friend",.95,2],ais:["friend",.8,9]}},
+{id:"F-121",k:"Air",x:4,y:-6,hd:200,sp:90,s:{iff:["friend",.95,1],radar:["friend",.7,1]}},
+{id:"U-307",k:"Surface",x:20,y:-14,hd:300,sp:12,s:{radar:["unknown",.6,8]}},
+{id:"U-318",k:"Air",x:-22,y:16,hd:126,sp:90,s:{radar:["unknown",.5,2],esm:["hostile",.4,12]}},
+{id:"N-520",k:"Surface",x:8,y:-18,hd:270,sp:11,s:{ais:["neutral",.9,5],radar:["neutral",.6,3]}},
+{id:"H-433",k:"Air",x:-5,y:20,hd:168,sp:100,s:{radar:["hostile",.6,2],esm:["hostile",.7,4],eo:["unknown",.3,15]}}];
+const rg=t=>Math.hypot(t.x,t.y);
+const fmt=s=>{s=Math.max(0,Math.round(s));return String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0")};
+const hms=s=>{const a=52320+s;return [Math.floor(a/3600),Math.floor(a/60)%60,a%60].map(v=>String(v).padStart(2,"0")).join(":")};
+function fuse(t){const sc={friend:0,hostile:0,unknown:0,neutral:0},mx={friend:0,hostile:0,unknown:0,neutral:0};let tot=0;const v=Object.values(t.s);
+v.forEach(([c,p])=>{sc[c]+=p;tot+=p;mx[c]=Math.max(mx[c],p)});
+const raw=mx.friend>=.6&&mx.hostile>=.6;let best=Object.keys(sc).sort((a,b)=>sc[b]-sc[a])[0];const conf=tot?sc[best]/tot:0;
+if(raw)best="conflict";else if(conf<.55||tot<.5)best="unknown";
+return {cls:t.ov||best,conf,raw,conflict:raw&&!t.ov,hs:v.filter(([c,p])=>c==="hostile"&&p>=.6).length,fr:mx.friend>=.6}}
+function kin(t){const vx=t.sp*Math.sin(t.hd*Math.PI/180),vy=t.sp*Math.cos(t.hd*Math.PI/180),vv=vx*vx+vy*vy;let tc=-(t.x*vx+t.y*vy)/vv;
+if(tc<0)return {cpa:rg(t),tcpa:null};return {cpa:Math.hypot(t.x+vx*tc,t.y+vy*tc),tcpa:tc*3600/F}}
+function mv(t){const a=t.hd*Math.PI/180,d=t.sp/3600*F;let n={...t,x:t.x+d*Math.sin(a),y:t.y+d*Math.cos(a)};if(rg(n)>38)n.hd=(n.hd+180)%360;return n}
+const NZ=[["Écho de mer — filtre actif",3],["Brouillage VHF canal 16",3],["Liaison 16 — qualité 62 %",3],["Nouvelle émission ESM bande X",3],["Cap modifié de plus de 10°",3],["AIS : position incohérente",3],["Piste perdue puis réacquise",2],["Vitesse inhabituelle",2],["Zone d’exclusion franchie",2]];
+
+const hdTo=(x,y)=>(Math.atan2(-x,-y)*180/Math.PI+360)%360;
+const SC=[
+{at:0,t:"Étape 1 : Situation nominale",d:"8 pistes, une seule anomalie : C-212 (IFF dit ami, ESM dit hostile). La jauge de charge est basse et les alertes sont lisibles. Cliquez sur C-212 pour voir la fusion des capteurs."},
+{at:18,t:"Étape 2 : Saturation en cours",d:"Un essaim de 5 drones rapides (85 kt) arrive du nord-est et un flux d’alertes se déclenche. Regardez la jauge de charge monter, les alertes s’empiler et le champ de vision se refermer.",run:c=>{c.startSat();c.add([[0,0],[3,-2],[-3,2],[2,3],[-2,-3]].map((o,i)=>{const x=24+o[0],y=24+o[1];return {id:"D-60"+(i+1),k:"Air",x,y,hd:hdTo(x,y),sp:85,s:{radar:["hostile",.7,2],esm:["hostile",.6,3]}}}));c.push(2,"D-601","Essaim : 5 pistes rapides au 045")}},
+{at:40,t:"Étape 3 : Conflit de capteurs non géré",d:"F-110, classé ami, bascule : ESM et radar la voient hostile alors que son IFF répond encore ami, en pleine zone. Cette alerte P2 est noyée dans le flux. Saurez-vous la retrouver ?",run:c=>{c.patch("F-110",t=>({...t,hd:hdTo(t.x,t.y),sp:38,s:{iff:["friend",.9,9],esm:["hostile",.85,1],radar:["hostile",.7,1]}}));c.push(2,"F-110","Émission ESM hostile alors que l’IFF répond ami")}},
+{at:62,t:"Étape 4 : Vecteur rapide",d:"V-701 (220 kt) fonce sur le bâtiment : quelques dizaines de secondes avant le CPA. Dans l’IHM standard, son alerte P1 se perd parmi les autres. Essayez de la traiter.",run:c=>{c.add([{id:"V-701",k:"Air",x:-24,y:-17,hd:hdTo(-24,-17),sp:220,s:{radar:["hostile",.8,1],esm:["hostile",.7,2]}}]);c.push(1,"V-701","Vecteur rapide à 220 kt — délai d’interception très court")}},
+{at:85,t:"Étape 5 : Comparer les deux IHM",d:"Basculez sur l’IHM Optimisée Retex Ops : menaces regroupées en grappes classées par urgence, bruit replié, action recommandée pour chaque grappe. Comparez la jauge et les délais du journal."}];
+const LEG=[["hostile","Rouge · Agir","Identification sûre (au moins 2 capteurs concordants, aucun indice ami). Vous pouvez évaluer une option de réponse ; vous seul la validez."],["conflict","Violet · Arbitrer","Deux capteurs fiables se contredisent (ex. IFF ami, ESM hostile). Vérifiez avant toute décision."],["unknown","Jaune · Confirmer","Informations insuffisantes. Attendez un second capteur, n’engagez rien."]];
+const TOUR=[
+{id:"tl",t:"Bloc 1 · Menaces prioritaires",d:"Ce panneau, en haut à gauche, ne liste que les pistes dangereuses : les hostiles et les conflits de capteurs. Elles sont regroupées en grappes (un essaim = une ligne) et classées par urgence : n°1 est la plus pressante. TCPA = temps avant que la piste passe au plus près de vous. Il remplace la recherche à l’œil parmi des dizaines d’alertes."},
+{id:"al",t:"Bloc 2 · Filtrage du bruit de fond",d:"Dans la liste Alertes, les P1 (critiques) restent en grand, les P2 sont regroupées par piste (×n) et les P3 (informations sans urgence) sont repliées en une ligne. Les pop-ups en cascade sont supprimés et les pistes inoffensives sont atténuées sur la carte. Rien n’est effacé : le bouton « Afficher » montre tout."},
+{t:"Bloc 3 · L’humain décide toujours",d:"Principe human-in-the-loop : le système trie, regroupe et recommande, mais ne décide jamais à votre place. Aucune option de réponse ne part sans vos actions explicites : acquitter, arbitrer, cocher 2 vérifications manuelles, maintenir le bouton 1,5 s. Les conditions automatiques peuvent seulement bloquer la validation, jamais la déclencher."},
+{t:"Bloc 4 · Lire les couleurs et les actions",leg:1,d:"Chaque grappe porte une pastille. La couleur dit quoi faire ; l’action recommandée est un conseil, pas un ordre."},
+{t:"Bloc 5 · Lire l’écran radar",d:"Le point central est votre bâtiment. Chaque anneau marque une distance (10, 20, 30, 40 nm ; 1 nm = 1,85 km). Un symbole est une piste, c’est-à-dire un contact détecté. Le trait devant lui montre où il sera dans 3 minutes : plus il est long, plus la piste est rapide. Losange rouge = hostile, rectangle bleu = ami, cercle jaune = douteux, carré vert = neutre, cercle violet pointillé = capteurs en conflit."}];
+function TourBubble({i,setI}){const s=TOUR[i];
+useEffect(()=>{const el=document.getElementById(s.id||"x");if(el){el.style.outline="3px solid #5fd0a0";el.style.outlineOffset="2px"}return()=>{if(el){el.style.outline="";el.style.outlineOffset=""}}},[i]);
+return h("div",{className:"pn fixed z-[46] p-3 shadow-2xl",role:"dialog","aria-label":"Guide de l’IHM optimisée",style:{left:"50%",bottom:12,transform:"translateX(-50%)",width:"min(560px,calc(100vw - 24px))",maxHeight:"min(70vh,520px)",overflowY:"auto",borderColor:"#5fd0a0"}},
+h("div",{className:"flex justify-between items-start gap-2"},h("h3",{className:"font-semibold"},s.t),h("button",{className:"bt",onClick:()=>setI(-1)},"Fermer")),
+h("p",{className:"text-sm mt-2 text-[#c3d1de]"},s.d),
+s.leg&&LEG.map(l=>h("div",{key:l[0],className:"flex gap-2 mt-2 p-2 text-sm",style:{background:"#0f1822",borderLeft:"6px solid "+C[l[0]]}},h("b",{style:{color:C[l[0]],whiteSpace:"nowrap"}},l[1]),h("span",null,l[2]))),
+h("div",{className:"flex items-center gap-2 mt-3"},h("span",{className:"text-xs text-[#7f93a6]"},(i+1)+" / "+TOUR.length),i>0&&h("button",{className:"bt ml-auto",onClick:()=>setI(i-1)},"Précédent"),h("button",{className:"bt on "+(i>0?"":"ml-auto"),onClick:()=>setI(i<TOUR.length-1?i+1:-1)},i<TOUR.length-1?"Suivant":"Terminer")))}
+const RX=["Rien à corriger ici : quand la situation est calme, l’IHM optimisée reste aussi discrète que l’IHM standard.","Le bruit de fond (P3) est replié en une seule ligne, les alertes identiques sont regroupées et l’essaim devient une seule grappe. Les pop-ups en cascade disparaissent : une liste triée remplace l’empilement. Comparez le compteur « affichées / en attente » de l’en-tête.","Les pistes inoffensives sont atténuées sur la carte. Le conflit de F-110 remonte dans « Menaces prioritaires » avec la mention « Arbitrer », et « Relancer l’IFF » est recommandé : la charge mentale baisse parce qu’il n’y a plus à chercher ni à comparer.","V-701 devient la menace n°1 dès son apparition, avec son délai d’interception et l’action « Agir ». Plus besoin de le retrouver dans un flux.","Basculez : un guide en 5 blocs s’ouvre pour expliquer chaque zone. Rejouez ensuite les mêmes décisions et comparez la jauge, le nombre d’éléments affichés et les délais du journal. La décision reste humaine : l’IHM ne fait que trier, regrouper et guider."];
+const WHY=["Charge faible : peu d’alertes et une seule décision à prendre (le conflit C-212). L’opérateur a le temps de lire chaque information.","Chaque alerte oblige à lire, classer puis acquitter. Au-delà de quelques éléments par minute, l’opérateur trie au lieu de décider et son champ de vision se réduit aux alertes les plus récentes : c’est le tunnel cognitif.","Deux sources fiables se contredisent : il faut comparer capteurs, âges et confiances. Cette comparaison coûte du temps, et l’alerte qui la signale est enfouie dans le flux.","Le temps disponible chute (délai d’interception court) alors que l’attention est déjà saturée : la décision la plus critique arrive au pire moment.","Le gain vient de la réduction du nombre d’éléments à traiter (regroupement, filtrage) et de l’action recommandée, pas d’une automatisation de la décision."];
+function Narrator({nar,setNar,step,onNext,onUi,ui}){const d=useRef(null),s=SC[step];
+if(!nar.open)return h("button",{className:"bt fixed z-[45] left-3 bottom-3",onClick:()=>setNar(n=>({...n,open:true}))},"Afficher le guide");
+return h("div",{className:"pn fixed z-[45] p-3 shadow-2xl",style:{left:nar.x,top:nar.y,width:"min(340px,calc(100vw - 24px))",maxHeight:"min(420px,calc(100vh - 16px))",overflowY:"auto",borderColor:"#4aa3ff"}},
+h("div",{className:"flex justify-between items-start gap-2 cursor-move select-none",style:{touchAction:"none"},onPointerDown:e=>{d.current={dx:e.clientX-nar.x,dy:e.clientY-nar.y};e.currentTarget.setPointerCapture(e.pointerId)},onPointerMove:e=>{const q=d.current;if(q)setNar(n=>({...n,x:Math.max(0,e.clientX-q.dx),y:Math.max(0,e.clientY-q.dy)}))},onPointerUp:()=>{d.current=null}},
+h("h3",{className:"font-semibold"},s.t),h("button",{className:"bt",onPointerDown:e=>e.stopPropagation(),onClick:()=>setNar(n=>({...n,open:false}))},"Fermer")),
+h("p",{className:"text-sm mt-2 text-[#c3d1de]"},s.d),h("p",{className:"text-xs mt-2 text-[#9fb1c2]"},h("b",null,"À retenir : "),WHY[step]),h("p",{className:"text-xs mt-2 text-[#c3d1de] p-2",style:{borderLeft:"3px solid #5fd0a0",background:"#0f1c18"}},h("b",{style:{color:"#5fd0a0"}},"Ce que change Retex Ops : "),RX[step]),
+h("div",{className:"flex items-center gap-2 mt-3"},h("span",{className:"text-xs text-[#7f93a6]"},(step+1)+" / "+SC.length+" · déplaçable"),
+step<SC.length-1?h("button",{className:"bt ml-auto",onClick:onNext},"Étape suivante"):ui==="std"?h("button",{className:"bt ml-auto on",onClick:onUi},"Basculer sur IHM Optimisée"):null))}
+function Badge({c,children}){return h("span",{className:"px-1.5 py-0.5 text-xs font-semibold",style:{border:"1px solid "+C[c],color:C[c]}},children)}
+function Sym({c,r,conflict}){const col=C[c];const p={fill:"#0a1017",stroke:col,strokeWidth:2};
+if(c==="hostile")return h("path",{d:"M0-"+r+"L"+r+" 0 0 "+r+" -"+r+" 0Z",...p});
+if(c==="friend")return h("rect",{x:-r,y:-r*.75,width:2*r,height:r*1.5,...p});
+if(c==="neutral")return h("rect",{x:-r*.8,y:-r*.8,width:r*1.6,height:r*1.6,...p});
+return h("circle",{r,...p,strokeDasharray:c==="conflict"?"3 2":undefined})}
+
+function TacticalMap(props){const {tracks,sel,onSel,dim}=props;
+return h("svg",{viewBox:"0 0 640 640",className:"w-full h-auto block",role:"img","aria-label":"Situation tactique maritime"},
+[10,20,30,40].map(n=>h("g",{key:n},h("circle",{cx:320,cy:320,r:n*8,fill:"none",stroke:"#1d2b3a",strokeWidth:1}),h("text",{x:324,y:320-n*8+11,fill:"#5d7288",fontSize:10},n+" nm"))),
+h("line",{x1:320,y1:0,x2:320,y2:640,stroke:"#16222f"}),h("line",{x1:0,y1:320,x2:640,y2:320,stroke:"#16222f"}),
+h("text",{x:314,y:14,fill:"#7f93a6",fontSize:11},"N"),
+h("path",{d:"M320 311L328 327 320 323 312 327Z",fill:"#d6e0ea"}),
+tracks.map(t=>{const f=fuse(t),a=t.hd*Math.PI/180,px=320+t.x*8,py=320-t.y*8,vl=t.sp/60*3*8,s=sel===t.id;
+return h("g",{key:t.id,opacity:dim&&dim.includes(t.id)?.3:1,transform:"translate("+px+" "+py+")",tabIndex:0,role:"button","aria-label":t.id+" "+L[f.cls],style:{cursor:"pointer"},onClick:()=>onSel(t.id),onKeyDown:e=>{if(e.key==="Enter"||e.key===" ")onSel(t.id)}},
+h("line",{x1:0,y1:0,x2:Math.sin(a)*vl,y2:-Math.cos(a)*vl,stroke:C[f.cls],strokeWidth:1.5,opacity:.8}),
+s&&h("circle",{r:20,fill:"none",stroke:"#fff",strokeWidth:1.5}),
+f.conflict&&h("circle",{r:17,fill:"none",stroke:C.conflict,strokeWidth:1.5,className:"pu"}),
+h(Sym,{c:f.cls,r:t.k==="Air"?8:10}),
+t.k==="Air"&&h("line",{x1:-5,y1:-14,x2:5,y2:-14,stroke:C[f.cls],strokeWidth:2}),
+h("text",{x:15,y:-9,fill:C[f.cls],fontSize:12,fontWeight:600},t.id),
+f.conflict&&h("text",{x:15,y:5,fill:C.conflict,fontSize:11},"CONFLIT"))}))}
+
+function Alert({a,onAck,onSel,big}){const col=a.p===1?"#ff4d4d":a.p===2?"#ffb020":"#7f93a6";
+return h("div",{className:"flex items-start gap-2 p-2 "+(big?"text-base":"text-sm"),style:{borderLeft:"4px solid "+col,background:a.p===1?"#2a1217":"#0f1822"}},
+h("span",{className:"font-semibold shrink-0",style:{color:col}},"P"+a.p),
+h("button",{className:"text-left grow",onClick:()=>onSel(a.tr)},h("span",{className:"font-semibold"},a.tr)," — ",a.tx,a.n>1?h("span",{className:"ml-1 font-semibold",style:{color:col}},"×"+a.n):null,h("span",{className:"block text-xs text-[#7f93a6]"},hms(a.t))),
+h("button",{className:"bt shrink-0",onClick:()=>onAck(a.ids)},"Acquitter"))}
+
+function Modal({t,f,alerts,onAck,onClose,onGo}){
+const rel=alerts.filter(a=>a.tr===t.id&&!a.ack&&a.p<=2);const[z,sz]=useState(false),[o,so]=useState(false);
+const g=[["Classification fusionnée hostile (hors arbitrage manuel)",!f.raw&&f.cls==="hostile"||(t.ov&&!f.raw&&f.hs>0&&f.cls==="hostile")],
+["Au moins 2 capteurs indépendants concordants (≥ 0,6)",f.hs>=2],["Aucun indice ami actif (IFF ou AIS)",!f.fr],
+["Alertes P1/P2 de la piste acquittées",rel.length===0]];
+const man=[["Zone de sécurité dégagée (aucun ami dans l’axe)",z,sz],["Autorisation de la chaîne de commandement reçue",o,so]];
+const ok=g.every(x=>x[1])&&z&&o;const[p,sp]=useState(0);const r=useRef();
+const stop=()=>{clearInterval(r.current);sp(0)};const start=()=>{if(!ok||r.current&&p>0)return;let v=0;clearInterval(r.current);r.current=setInterval(()=>{v+=100/30;sp(v);if(v>=100){clearInterval(r.current);sp(0);onGo()}},50)};
+useEffect(()=>()=>clearInterval(r.current),[]);
+return h("div",{className:"fixed inset-0 z-50 flex items-center justify-center p-3",style:{background:"rgba(4,8,12,.85)"},role:"dialog","aria-modal":"true"},
+h("div",{className:"pn w-full max-w-xl p-4 scr max-h-full"},
+h("div",{className:"flex justify-between items-center mb-3"},h("h2",{className:"text-lg font-semibold"},"Option de réponse sur ",t.id," (simulation)"),h("button",{className:"bt",onClick:onClose},"Annuler")),
+h("p",{className:"text-sm text-[#9fb1c2] mb-3"},"Chaque condition doit être remplie avant de pouvoir valider. Les conditions automatiques viennent des capteurs, pas de l’arbitrage manuel."),
+g.map((x,i)=>h("div",{key:i,className:"flex gap-2 py-1.5 text-sm",style:{borderBottom:"1px solid #1d2b3a"}},h("span",{className:"font-bold w-5",style:{color:x[1]?"#5fd0a0":"#ff4d4d"}},x[1]?"✓":"✗"),h("span",null,x[0]))),
+rel.map(a=>h("div",{key:a.id,className:"mt-2"},h(Alert,{a,onAck,onSel:()=>{}}))),
+man.map((x,i)=>h("label",{key:i,className:"flex gap-2 py-1.5 text-sm items-center",style:{borderBottom:"1px solid #1d2b3a"}},h("input",{type:"checkbox",checked:x[1],onChange:e=>x[2](e.target.checked),className:"w-5 h-5"}),x[0])),
+h("button",{disabled:!ok,className:"w-full mt-4 py-3 font-semibold text-base",style:{border:"1px solid #ff4d4d",color:"#fff",background:ok?"linear-gradient(90deg,#a01f2a "+p+"%,#3a1519 "+p+"%)":"#1a2735"},
+onPointerDown:start,onPointerUp:stop,onPointerLeave:stop,onKeyDown:e=>{if((e.key===" "||e.key==="Enter")&&!e.repeat){e.preventDefault();start()}},onKeyUp:stop},ok?"Maintenir 1,5 s pour valider":"Validation verrouillée — conditions non remplies")))}
+
+function App({onReset}){
+const[tracks,setTracks]=useState(T0),[alerts,setAlerts]=useState([]),[sel,setSel]=useState("C-212"),[clock,setClock]=useState(0),[ui,setUi]=useState("std"),[tour,setTour]=useState(-1),[step,setStep]=useState(0),[nar,setNar]=useState({open:true,x:16,y:Math.max(70,window.innerHeight-440)}),[paused,setPaused]=useState(false),[log,setLog]=useState([]),[modal,setModal]=useState(false),[sat,setSat]=useState(false),[showP3,setShowP3]=useState(false);
+const R=useRef({tr:T0,ck:0,pa:false,sat:false,end:0,id:0,fl:false,sc:0,pk:{std:0,opt:0},born:{},al:[],selT:{id:"C-212",t:0}});const X=R.current;X.ui=ui;X.al=alerts;
+const push=(p,tr,tx)=>setAlerts(a=>[...a,{id:++X.id,p,tr,tx,t:X.ck,ack:false}]);
+const addLog=(tr,tx,d,fl)=>setLog(l=>[{t:X.ck,tr,tx,d,fl,u:X.ui},...l].slice(0,30));
+useEffect(()=>{push(2,"C-212","Conflit de classification IFF / ESM");push(3,"U-307","Piste douteuse non identifiée");
+const i1=setInterval(()=>{if(X.pa)return;X.ck++;setClock(X.ck);X.tr=X.tr.map(mv);setTracks(X.tr);const d=X.tr.find(t=>t.id==="H-433");
+if(d&&!X.fl&&rg(d)<14){X.fl=true;push(1,"H-433","Approche rapide — CPA "+kin(d).cpa.toFixed(1)+" nm — option de réponse à évaluer")}const nx=SC[X.sc+1];if(nx&&X.ck>=nx.at)adv()},1000);
+const i2=setInterval(()=>{if(X.pa||!X.sat)return;if(X.ck>=X.end){X.sat=false;setSat(false);return}
+const n=NZ[Math.floor(Math.random()*NZ.length)],t=X.tr[Math.floor(Math.random()*X.tr.length)];push(n[1],t.id,n[0])},350);
+return()=>{clearInterval(i1);clearInterval(i2)}},[]);
+const doSel=id=>{X.selT={id,t:X.ck};setSel(id)};
+const ack=ids=>{setAlerts(a=>{a.filter(x=>ids.includes(x.id)&&x.p===1&&!x.ack).forEach(x=>addLog(x.tr,"Alerte P1 acquittée",X.ck-x.t,""));return a.map(x=>ids.includes(x.id)?{...x,ack:true}:x)})};
+const startSat=()=>{X.sat=true;X.end=X.ck+70;setSat(true);X.fl=false;X.tr=X.tr.map(t=>t.id==="H-433"?{...t,x:-4,y:22,hd:165}:t);setTracks(X.tr);setAlerts(a=>a.map(x=>x.p===1&&x.tr==="H-433"?{...x,ack:true}:x))};
+const togglePause=()=>{X.pa=!X.pa;setPaused(X.pa)};
+const arb=(c,why)=>{X.tr=X.tr.map(t=>t.id===sel?{...t,ov:c}:t);setTracks(X.tr);const f=fuse(X.tr.find(t=>t.id===sel));addLog(sel,"Arbitrage manuel → "+L[c]+" ("+why+")",dly(sel),c==="hostile"&&fuse({...X.tr.find(t=>t.id===sel),ov:null}).fr?"Hostile retenu malgré indice ami":"")};
+const add=a=>{a.forEach(x=>{X.born[x.id]=X.ck});X.tr=[...X.tr,...a];setTracks(X.tr)};const patch=(id,fn)=>{X.tr=X.tr.map(x=>x.id===id?fn(x):x);setTracks(X.tr)};
+const adv=()=>{if(X.sc>=SC.length-1)return;X.sc++;setStep(X.sc);const s=SC[X.sc];if(s.run)s.run({startSat,add,patch,push})};
+const reIff=()=>{const tt=X.tr.find(x=>x.id===sel),bad=fuse({...tt,ov:null}).hs>=2;patch(sel,x=>({...x,ov:null,s:{...x.s,iff:bad?["unknown",.2,0]:["friend",.9,0]}}));addLog(sel,bad?"IFF relancé : authentification échouée":"IFF relancé : réponse ami confirmée",dly(sel),"")};
+const mode=ui==="opt"?"hier":"brut";
+const dly=id=>{const a=X.al.filter(x=>x.tr===id&&x.p<=2).map(x=>x.t);return X.ck-(a.length?Math.min(...a):(X.born[id]||0))};
+const t=tracks.find(x=>x.id===sel),f=fuse(t),k=kin(t);
+const un=alerts.filter(a=>!a.ack);const g0=l=>{const m={};l.forEach(a=>{m[a.tr+a.tx]=1});return Object.keys(m).length};const np1=un.filter(a=>a.p===1).length,np2=g0(un.filter(a=>a.p===2)),np3=g0(un.filter(a=>a.p===3));
+const load=ui==="opt"?np1*4+np2*.3+np3*.05:un.reduce((s,a)=>s+(a.p===1?4:a.p===2?2:1),0),pct=Math.min(100,load/40*100),lv=pct<35?["Nominale","#5fd0a0"]:pct<70?["Élevée","#ffb020"]:["Saturée","#ff4d4d"];
+const grp=l=>{const m={};l.forEach(a=>{const key=a.tr+a.tx;if(m[key]){m[key].n++;m[key].ids.push(a.id);m[key].t=a.t}else m[key]={...a,n:1,ids:[a.id]}});return Object.values(m).sort((a,b)=>b.t-a.t)};
+const p1=un.filter(a=>a.p===1),p2=grp(un.filter(a=>a.p===2)),p3=un.filter(a=>a.p===3);
+const shown=mode==="hier"?p1.length+p2.length+(showP3?grp(p3).length:0):un.length;
+const raw=[...un].reverse().slice(0,80).map(a=>({...a,n:1,ids:[a.id]}));
+const order={hostile:0,conflict:1,unknown:2,friend:3,neutral:4};
+const thr=tracks.filter(x=>{const c=fuse(x).cls;return c==="hostile"||c==="conflict"});const cl=[];thr.forEach(x=>{const g=cl.find(c=>c.k===x.k&&Math.hypot(c.m[0].x-x.x,c.m[0].y-x.y)<8);if(g)g.m.push(x);else cl.push({k:x.k,m:[x]})});
+const cls2=cl.map(g=>{const ts=g.m.map(m=>kin(m).tcpa).filter(v=>v!=null),fs=g.m.map(m=>fuse(m));return {m:g.m,ids:g.m.map(m=>m.id),tm:ts.length?Math.min(...ts):999,cf:fs.some(q=>q.conflict),ok:fs.every(q=>q.hs>=2&&!q.fr)}}).sort((a,b)=>a.tm-b.tm);
+const dim=ui==="opt"?tracks.filter(x=>!thr.includes(x)&&x.id!==sel).map(x=>x.id):[];
+const st=u=>{const e=log.filter(l=>l.u===u&&l.d>0);return {n:e.length,m:e.length?e.reduce((s,l)=>s+l.d,0)/e.length:null}};const s1=st("std"),s2=st("opt"),gain=s1.m!=null&&s2.m!=null&&s1.m>0?Math.round((1-s2.m/s1.m)*100):null;
+const lS=un.reduce((s,a)=>s+(a.p===1?4:a.p===2?2:1),0),lO=np1*4+np2*.3+np3*.05;X.pk.std=Math.max(X.pk.std,Math.min(100,lS/40*100));X.pk.opt=Math.max(X.pk.opt,Math.min(100,lO/40*100));
+const coach=()=>{const g=cls2[0];if(!g)return {s:'veille',t:'Aucune menace à traiter pour l’instant. Surveillez la jauge : le guide vous dira quoi faire dès qu’une menace apparaît.'};
+if(modal)return {s:'validation',t:'Dans la fenêtre, une condition marquée ✗ bloque la validation (c’est un garde-fou, pas une décision). Corrigez-la (acquittez une alerte, cochez une vérification), puis maintenez le bouton rouge 1,5 s.'};
+const gl=g.m.length>1?'la grappe de '+g.m.length+' pistes ('+g.ids[0]+'…)':g.ids[0];
+if(!g.ids.includes(sel))return {s:'1/4 · choisir la menace',t:'Priorité n°1 : '+gl+(g.tm<999?' (TCPA '+fmt(g.tm)+')':'')+'. Cliquez « Traiter » dans la liste ci-dessous : cela sélectionne la piste et affiche ce que disent ses capteurs dans le panneau Fusion (TCPA = temps avant son passage au plus près de vous). Vous avez sélectionné '+sel+', qui n’est pas la plus urgente.'};
+const a1=un.filter(a=>a.tr===sel&&a.p===1),a2=un.filter(a=>a.tr===sel&&a.p===2);
+if(a1.length)return {s:'2/4 · alerte critique',t:'Acquittez l’alerte P1 de '+sel+' (bouton « Acquitter » en rouge dans la liste Alertes) : P1 = priorité maximale. Acquitter ne déclenche aucune action, cela signifie seulement « vu ».'};
+if(f.conflict){const rel=t.s.iff&&t.s.iff[2]===0;return rel?{s:'3/4 · arbitrer',t:'L’IFF confirme « ami » alors que d’autres capteurs voient « hostile ». En cas de doute, choisissez « Retenir IFF (ami) » ou « Maintenir douteux ». Ne retenez pas hostile contre un IFF valide.'}:{s:'3/4 · lever le conflit',t:'Les capteurs se contredisent sur '+sel+'. Cliquez d’abord « Relancer l’IFF » dans le panneau Fusion : l’IFF est le code que renvoient les unités amies quand on les interroge ; ce bouton le redemande avant toute décision.'}}
+if(t.ov==='friend'||t.ov==='unknown')return {s:'4/4 · piste suivante',t:sel+(t.ov==='friend'?' est retenue ami : aucune option de réponse possible.':' est maintenue douteuse : surveillez-la.')+' Passez à la menace suivante de la liste ou attendez un nouvel événement.'};
+if(f.cls==='hostile'&&f.fr)return {s:'3/4 · indice ami restant',t:'Un indice ami (IFF ou AIS) subsiste sur '+sel+' : la validation reste verrouillée. Annulez l’arbitrage, puis relancez l’IFF.'};
+if(f.cls==='hostile'&&f.hs<2)return {s:'3/4 · confirmer',t:'Un seul capteur fiable voit '+sel+' hostile. N’engagez rien : attendez un second capteur concordant.'};
+if(f.cls==='hostile'){if(a2.length)return {s:'3/4 · alertes liées',t:'Acquittez les '+a2.length+' alerte(s) P2 de '+sel+' : elles bloquent la validation tant qu’elles restent ouvertes.'};return {s:'4/4 · décider',t:'Identification positive et alertes traitées. La décision vous appartient : le système ne déclenche jamais rien seul. Cliquez « Évaluer une option de réponse » (panneau Fusion), cochez les deux vérifications manuelles, puis maintenez le bouton 1,5 s.'}}
+return {s:'suivi',t:sel+' est classée « '+L[f.cls]+' ». Surveillez-la ou passez à la menace suivante de la liste.'}};
+const co=coach();
+const toggleUi=()=>{const n=ui==="std"?"opt":"std";setUi(n);setTour(n==="opt"?0:-1);addLog("—","Bascule : "+(n==="opt"?"IHM optimisée":"IHM standard"),0,"");if(n==="opt"&&cls2[0])doSel(cls2[0].ids[0])};
+const sorted=[...tracks].sort((a,b)=>order[fuse(a).cls]-order[fuse(b).cls]);
+return h("div",{className:"p-2 md:p-3 min-h-screen flex flex-col gap-2"},
+h("header",{className:"pn flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2"},
+h("h1",{className:"font-semibold text-base"},"Retex Ops — Démonstrateur IHM CO"),
+h("span",{className:"text-lg font-semibold"},hms(clock)),
+h("div",{className:"flex items-center gap-2 grow min-w-[240px]"},h("span",{className:"text-sm text-[#9fb1c2]"},"Charge cognitive"),
+h("div",{className:"grow h-3 bg-[#0a1017] border border-[#2e4155]",role:"meter","aria-valuenow":Math.round(pct),"aria-valuemin":0,"aria-valuemax":100},h("div",{style:{width:pct+"%",height:"100%",background:lv[1]}})),
+h("span",{className:"text-sm font-semibold w-20",style:{color:lv[1]}},lv[0]),h("span",{className:"text-xs text-[#9fb1c2]"},shown+" affichées / "+un.length)),
+h("div",{className:"flex flex-wrap gap-2"},h("button",{className:"px-3 py-1.5 text-sm font-semibold",style:{border:"2px solid #5fd0a0",background:ui==="opt"?"#14392c":"#112a22"},onClick:toggleUi},ui==="opt"?"Revenir à l’IHM standard":"Basculer sur IHM Optimisée Retex Ops"),h("button",{className:"bt",style:{borderColor:"#ffb020"},disabled:sat,onClick:startSat},sat?"Saturation en cours…":"Simuler une saturation"),h("button",{className:"bt",onClick:togglePause},paused?"Reprendre":"Pause"),h("button",{className:"bt",onClick:onReset},"Réinitialiser"))),
+h("div",{className:"grid gap-2 grow lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]"},
+h("section",{className:"pn p-2 flex flex-col gap-2"},h("div",{id:"tl"}),
+h("div",{className:"flex justify-between items-center px-1"},h("h2",{className:"font-semibold"},"Situation tactique"),h("div",{className:"flex gap-3 text-xs text-[#9fb1c2]"},["friend","hostile","unknown","neutral","conflict"].map(c=>h("span",{key:c,style:{color:C[c]}},"■ "+L[c])))),
+h("div",{style:{background:"#080d13",border:"1px solid #1d2b3a"}},h(TacticalMap,{tracks,sel,onSel:doSel,dim})),
+h("div",{className:"flex flex-wrap gap-1.5"},sorted.map(x=>{const c=fuse(x).cls;return h("button",{key:x.id,className:"bt "+(x.id===sel?"on":""),style:{borderLeft:"4px solid "+C[c]},onClick:()=>doSel(x.id)},x.id+" · "+L[c]+" · "+rg(x).toFixed(0)+" nm")}))),
+h("div",{className:"flex flex-col gap-2 min-w-0"},
+ui==="opt"&&document.getElementById("tl")&&ReactDOM.createPortal(h("section",{className:"pn p-3",style:{borderColor:"#5fd0a0"}},h("h2",{className:"font-semibold"},"Menaces prioritaires"),h("p",{className:"text-xs text-[#9fb1c2] mb-2"},"Seules les pistes hostiles ou en conflit, de la plus urgente (n°1) à la moins urgente."),cls2[0]&&h("div",{className:"p-2 mb-2","aria-live":"polite",style:{background:"#14392c",border:"1px solid #5fd0a0"}},h("div",{className:"text-xs text-[#9fb1c2]"},"Prochaine action · "+co.s),h("div",{className:"text-sm font-semibold"},co.t),h("div",{className:"text-xs mt-1.5 text-[#9fb1c2]"},cls2[0].cf?"Pastille violette « Arbitrer » : deux capteurs fiables se contredisent. Vérifiez avant de décider.":cls2[0].ok?"Pastille rouge « Agir » : la piste est identifiée hostile de façon sûre. Vous pouvez évaluer une option de réponse ; vous seul la validez.":"Pastille jaune « Confirmer » : informations insuffisantes. Attendez un second capteur, n’engagez rien.")),
+cls2.length===0&&h("p",{className:"text-sm text-[#7f93a6]"},"Aucune menace hostile ou en conflit."),
+cls2.slice(0,4).map((g,i)=>{const a=g.cf?["Arbitrer","conflict"]:g.ok?["Agir","hostile"]:["Confirmer","unknown"];return h("div",{key:g.ids[0],className:"flex items-center gap-3 p-2 mb-1.5",style:{background:"#0f1822",borderLeft:"6px solid "+C[a[1]]}},h("span",{className:"font-semibold w-5"},i+1),
+h("div",{className:"grow text-sm"},h("div",{className:"font-semibold"},g.m.length>1?g.m[0].k+" ×"+g.m.length+" ("+g.ids[0]+"…)":g.ids[0]),h("div",{className:"text-xs text-[#9fb1c2]"},"Plus proche "+Math.min(...g.m.map(rg)).toFixed(0)+" nm · "+(g.tm<999?"TCPA "+fmt(g.tm):"s’éloigne")),h("div",{className:"text-xs"},g.cf?"Conflit capteurs : relancer l’IFF avant toute option":g.ok?"Identification positive : option de réponse possible":"Identification incomplète : confirmer par un second capteur")),
+h(Badge,{c:a[1]},a[0]),h("button",{className:"bt",onClick:()=>doSel(g.ids[0])},"Traiter"))}),
+h("p",{className:"text-xs text-[#7f93a6] mt-1"},"Bruit filtré : "+p3.length+" alertes P3 repliées, pistes sans menace atténuées sur la carte."),h("div",{className:"flex gap-2 mt-2"},h("button",{className:"bt",onClick:()=>setTour(0)},"Revoir l’explication"))),document.getElementById("tl")),
+h("section",{className:"pn p-3"},
+h("div",{className:"flex flex-wrap justify-between items-start gap-2"},h("div",null,h("h2",{className:"font-semibold text-lg"},"Fusion de données — ",t.id),h("p",{className:"text-xs text-[#9fb1c2]"},t.k+" · distance "+rg(t).toFixed(1)+" nm · cap "+Math.round(t.hd)+"° · "+t.sp+" kt · CPA "+k.cpa.toFixed(1)+" nm"+(k.tcpa!=null?" dans "+fmt(k.tcpa):" (dépassé)"))),
+h("div",{className:"text-right"},h(Badge,{c:f.cls},(t.ov?"Arbitré : ":"")+L[f.cls]),h("div",{className:"text-xs text-[#9fb1c2] mt-1"},"Confiance fusion "+Math.round(f.conf*100)+" %"))),
+f.conflict&&h("div",{className:"mt-3 p-2 text-sm",style:{border:"1px solid "+C.conflict,background:"#22142b"}},h("b",null,"Conflit de classification. "),"Un capteur donne ami, un autre hostile. La fusion ne tranche pas : aucune option de réponse n’est possible tant qu’un opérateur n’a pas arbitré."),
+h("table",{className:"w-full mt-3 text-sm"},h("thead",null,h("tr",{className:"text-left text-xs text-[#7f93a6]"},["Capteur","Classe","Confiance","Âge"].map(x=>h("th",{key:x,className:"font-normal py-1"},x)))),
+h("tbody",null,Object.entries(t.s).map(([n,[c,p,a]])=>h("tr",{key:n,style:{borderTop:"1px solid #1d2b3a"}},h("td",{className:"py-1.5"},SN[n]),h("td",null,h("span",{style:{color:C[c]},className:"font-semibold"},L[c])),
+h("td",null,h("div",{className:"flex items-center gap-2"},h("div",{className:"w-16 h-2 bg-[#0a1017]"},h("div",{style:{width:p*100+"%",height:"100%",background:C[c]}})),Math.round(p*100)+" %")),h("td",{className:a>8?"text-[#ffb020]":""},a+" s"))))),
+h("div",{className:"flex flex-wrap gap-2 mt-3"},
+f.raw&&!t.ov&&h("button",{className:"bt "+(ui==="opt"?"on":""),onClick:reIff},"Relancer l’IFF"+(ui==="opt"?" (recommandé)":"")),f.raw&&!t.ov&&[["friend","Retenir IFF (ami)","IFF"],["hostile","Retenir ESM (hostile)","ESM"],["unknown","Maintenir douteux","contre-vérification demandée"]].map(([c,l,w])=>h("button",{key:c,className:"bt",style:{borderColor:C[c]},onClick:()=>arb(c,w)},l)),
+t.ov&&h("button",{className:"bt",onClick:()=>{X.tr=X.tr.map(x=>x.id===sel?{...x,ov:null}:x);setTracks(X.tr)}},"Annuler l’arbitrage"),
+h("button",{className:"bt ml-auto",style:{borderColor:"#ff4d4d",color:"#ffb3b3"},onClick:()=>setModal(true)},"Évaluer une option de réponse"))),
+h("section",{id:"al",className:"pn p-3 flex flex-col min-h-[260px]"},
+h("div",{className:"flex flex-wrap justify-between items-center gap-2 mb-2"},h("h2",{className:"font-semibold"},"Alertes"),
+h("span",{className:"text-xs font-semibold",style:{color:ui==="opt"?"#5fd0a0":"#ffb020"}},ui==="opt"?"IHM Optimisée Retex Ops":"IHM standard")),
+h("div",{className:"scr flex flex-col gap-1.5",style:{maxHeight:380}},
+un.length===0&&h("p",{className:"text-sm text-[#7f93a6]"},"Aucune alerte en attente."),
+mode==="hier"?[
+p1.map(a=>h(Alert,{key:a.id,a:{...a,n:1,ids:[a.id]},onAck:ack,onSel:doSel,big:true})),
+p2.map(a=>h(Alert,{key:a.id,a,onAck:ack,onSel:doSel})),
+p3.length>0&&h("div",{key:"p3",className:"flex items-center gap-2 p-2 text-sm",style:{background:"#0f1822",border:"1px dashed #2e4155"}},h("span",{className:"grow"},p3.length+" alertes P3 regroupées en "+grp(p3).length+" lignes"),h("button",{className:"bt",onClick:()=>setShowP3(!showP3)},showP3?"Masquer":"Afficher"),h("button",{className:"bt",onClick:()=>ack(p3.map(a=>a.id))},"Tout acquitter")),
+showP3&&grp(p3).map(a=>h(Alert,{key:"g"+a.id,a,onAck:ack,onSel:doSel}))]
+:raw.map(a=>h(Alert,{key:a.id,a,onAck:ack,onSel:doSel}))),
+h("p",{className:"text-xs text-[#7f93a6] mt-2"},mode==="hier"?"P1 épinglées en tête, P2 regroupées par piste, P3 repliées. Le tri est automatique, l’acquittement reste manuel.":"Flux chronologique sans tri : toutes les alertes ont le même poids visuel. Comparez avec le mode hiérarchisé."))),
+),
+h("section",{className:"pn p-3"},h("h2",{className:"font-semibold mb-1"},"Journal Retex — décisions et délais"),h("div",{className:"flex flex-wrap gap-3 mb-2 text-sm"},[["std","IHM standard","#ffb020"],["opt","IHM optimisée","#5fd0a0"]].map(([u,l,c])=>{const s=st(u);return h("div",{key:u,className:"px-3 py-1.5",style:{border:"1px solid "+c}},"Délai moyen "+l+" : ",h("b",{style:{color:c}},s.m==null?"—":fmt(s.m)),h("span",{className:"text-xs text-[#9fb1c2]"}," ("+s.n+" décision"+(s.n>1?"s":"")+")"),h("span",{className:"block text-xs text-[#9fb1c2]"},"Pic de charge observé : "+Math.round(X.pk[u])+" %"))}),
+gain!==null&&h("div",{className:"px-3 py-1.5 font-semibold self-center",style:{border:"1px solid #5fd0a0",color:gain>=0?"#5fd0a0":"#ff4d4d"}},"Gain de délai : "+(gain>0?"+":"")+gain+" %"),
+h("span",{className:"text-xs text-[#7f93a6] self-center max-w-xs"},"Indicatif : une session, un seul opérateur. Délais mesurés depuis l’apparition de la menace.")),
+h("div",{className:"scr",style:{maxHeight:150}},log.length===0?h("p",{className:"text-sm text-[#7f93a6]"},"Aucune décision enregistrée. Acquittez une alerte P1, arbitrez un conflit ou validez une option."):
+h("table",{className:"w-full text-sm"},h("tbody",null,log.map((l,i)=>h("tr",{key:i,style:{borderTop:"1px solid #1d2b3a"}},h("td",{className:"py-1 pr-3 text-[#9fb1c2]"},hms(l.t)),h("td",{className:"pr-3 font-semibold"},l.tr),h("td",{className:"pr-3"},l.tx),h("td",{className:"pr-3 whitespace-nowrap"},"délai "+fmt(l.d)),h("td",{style:{color:"#ffb020"}},l.fl))))))),
+ui==="std"&&pct>=20&&h("div",{className:"fixed inset-0 z-40 pointer-events-none",style:{background:"radial-gradient(ellipse at center,transparent "+Math.round(70-pct*.4)+"%,rgba(0,0,0,"+(.2+pct*.0055).toFixed(2)+") 100%)"}}),
+ui==="std"&&(sat||un.length>10)&&h("div",{className:"fixed right-3 bottom-3 z-40 pointer-events-none",style:{width:290,height:170}},un.slice(-6).map((a,i)=>h("div",{key:a.id,className:"pn absolute text-xs p-2",style:{right:i*16,bottom:i*24,width:250,borderLeft:"4px solid "+(a.p===1?"#ff4d4d":"#ffb020")}},a.tr+" — "+a.tx))),
+ui==="std"&&(sat||un.length>10)&&[["top-16 right-3",-12,-6],["bottom-3 left-3 hidden md:block",-18,-12]].map((c,ci)=>h("div",{key:ci,className:"fixed z-40 pointer-events-none "+c[0],style:{width:290,height:170}},un.slice(c[1],c[2]).map((a,i)=>h("div",{key:a.id,className:"pn absolute text-xs p-2",style:{[ci?"left":"right"]:i*16,[ci?"bottom":"top"]:i*24,width:250,borderLeft:"4px solid "+(a.p===1?"#ff4d4d":"#ffb020")}},a.tr+" — "+a.tx)))),
+ui==="opt"&&tour>=0&&h(TourBubble,{i:tour,setI:setTour}),
+h(Narrator,{nar,setNar,step,onNext:adv,onUi:toggleUi,ui}),
+modal&&h(Modal,{t,f,alerts,onAck:ack,onClose:()=>setModal(false),onGo:()=>{addLog(t.id,"Option de réponse validée (simulation)",dly(t.id),"");setModal(false)}}))}
+
+function Root(){const[k,setK]=useState(0);return h(App,{key:k,onReset:()=>setK(k+1)})}
+ReactDOM.createRoot(document.getElementById("root")).render(h(Root));
+</script>
+</body>
+</html>
